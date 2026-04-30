@@ -1,7 +1,7 @@
 import os
 import asyncio
 import discord
-from discord.ext import commands
+from discord.ext import commands, voice_recv
 from dotenv import load_dotenv
 from nim_services import NIMServices
 from audio_handler import AudioHandler
@@ -49,7 +49,7 @@ async def join_voice(ctx: commands.Context):
         return
 
     channel = ctx.author.voice.channel
-    vc = await channel.connect()
+    vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
     await ctx.send(f"intru în {channel.name}.")
 
     try:
