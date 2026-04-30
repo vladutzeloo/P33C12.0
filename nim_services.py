@@ -18,6 +18,11 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_ASR_MODEL = os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
 ASR_LANGUAGE = os.getenv("ASR_LANGUAGE", "ro")
+ASR_PROMPT = os.getenv(
+    "ASR_PROMPT",
+    "Conversaţie casuală în română între prieteni. Vorbire naturală, "
+    "argou, înjurături uşoare, propoziţii scurte.",
+)
 
 TTS_VOICE = os.getenv("TTS_VOICE", "ro-RO-EmilNeural")
 TTS_RATE = os.getenv("TTS_RATE", "+40%")
@@ -84,6 +89,8 @@ class NIMServices:
                     model=GROQ_ASR_MODEL,
                     file=audio_file,
                     language=ASR_LANGUAGE,
+                    prompt=ASR_PROMPT,
+                    temperature=0.0,
                 )
             return result.text or ""
         finally:

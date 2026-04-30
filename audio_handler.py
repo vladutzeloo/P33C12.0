@@ -1,4 +1,5 @@
 import asyncio
+import audioop
 import io
 import os
 import time
@@ -29,6 +30,7 @@ discord.opus.Decoder.decode = _safe_opus_decode
 
 SILENCE_THRESHOLD = 500   # ms of silence before processing
 MIN_AUDIO_LEN = 0.6       # seconds minimum for valid audio
+MIN_RMS = 350             # min audio loudness; below this, skip (Whisper hallucinates on quiet audio)
 HISTORY_TURNS = 6         # rolling per-user message buffer (user+assistant pairs)
 IDLE_INTERVAL_SEC = 45    # seconds of silence before bot blurts something
 
@@ -108,8 +110,12 @@ class AudioHandler:
                 sink.buffer[user_id] = []
 
                 duration = len(pcm) / (48000 * 2 * 2)
-                print(f"[AudioHandler] buffered {duration:.2f}s from {user_id}")
+                rms = audioop.rms(pcm, 2)
+                print(f"[AudioHandler] buffered {duration:.2f}s rms={rms} from {user_id}")
                 if duration < MIN_AUDIO_LEN:
+                    continue
+                if rms < MIN_RMS:
+                    print(f"[AudioHandler] too quiet (rms={rms} < {MIN_RMS}), skipping")
                     continue
 
                 wav_bytes = self.pcm_to_wav(pcm)
