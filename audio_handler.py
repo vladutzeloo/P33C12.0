@@ -4,9 +4,26 @@ import os
 import wave
 from collections import deque, defaultdict
 import discord
+import discord.opus
 from discord.ext import voice_recv
 from nim_services import NIMServices
 from schemas import ChatMessage
+
+
+# Patch discord.opus.Decoder.decode so a corrupted packet doesn't kill
+# the voice_recv router thread — known instability in the alpha lib.
+_SILENCE_FRAME = b"\x00" * 3840  # 20ms @ 48kHz stereo 16-bit
+_orig_opus_decode = discord.opus.Decoder.decode
+
+
+def _safe_opus_decode(self, data, fec=False):
+    try:
+        return _orig_opus_decode(self, data, fec=fec)
+    except discord.opus.OpusError:
+        return _SILENCE_FRAME
+
+
+discord.opus.Decoder.decode = _safe_opus_decode
 
 
 SILENCE_THRESHOLD = 500   # ms of silence before processing
