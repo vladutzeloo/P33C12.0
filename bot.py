@@ -48,6 +48,10 @@ async def join_voice(ctx: commands.Context):
         await ctx.send("bagă-te într-un voice mai întâi.")
         return
 
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect(force=True)
+        await asyncio.sleep(1)
+
     channel = ctx.author.voice.channel
     vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
     await ctx.send(f"intru în {channel.name}.")
