@@ -17,6 +17,7 @@ DEFAULT_MODEL = os.getenv("NIM_LLM_MODEL", "meta/llama-3.1-70b-instruct")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_ASR_MODEL = os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
+ASR_LANGUAGE = os.getenv("ASR_LANGUAGE", "ro")
 
 TTS_VOICE = os.getenv("TTS_VOICE", "ro-RO-EmilNeural")
 TTS_RATE = os.getenv("TTS_RATE", "+40%")
@@ -82,6 +83,7 @@ class NIMServices:
                 result = self.asr_client.audio.transcriptions.create(
                     model=GROQ_ASR_MODEL,
                     file=audio_file,
+                    language=ASR_LANGUAGE,
                 )
             return result.text
         finally:
