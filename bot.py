@@ -1,8 +1,11 @@
 import os
 import asyncio
+import logging
 import discord
 from discord.ext import commands, voice_recv
 from dotenv import load_dotenv
+
+logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
 from nim_services import NIMServices
 from audio_handler import AudioHandler
 from db import init_db, get_usage_summary
