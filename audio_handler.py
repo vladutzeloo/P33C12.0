@@ -88,14 +88,19 @@ class AudioHandler:
                 wav_bytes = self.pcm_to_wav(pcm)
 
                 try:
-                    transcript = nim.transcribe(wav_bytes)
+                    loop = asyncio.get_running_loop()
+                    transcript = await loop.run_in_executor(
+                        None, nim.transcribe, wav_bytes
+                    )
                     print(f"[ASR] {user_id}: {transcript}")
 
                     if not transcript.strip():
                         continue
 
                     user_history = list(self.history[user_id])
-                    response_text = nim.chat(transcript, history=user_history)
+                    response_text = await loop.run_in_executor(
+                        None, lambda: nim.chat(transcript, history=user_history)
+                    )
                     print(f"[LLM] {response_text}")
 
                     self.history[user_id].append(

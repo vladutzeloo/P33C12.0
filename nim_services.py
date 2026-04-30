@@ -1,6 +1,5 @@
 import os
 import time
-import asyncio
 import tempfile
 import edge_tts
 from openai import OpenAI
@@ -56,13 +55,18 @@ class NIMServices:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(audio_bytes)
             tmp_path = f.name
-
-        with open(tmp_path, "rb") as audio_file:
-            result = self.client.audio.transcriptions.create(
-                model="openai/whisper-large-v3",
-                file=audio_file,
-            )
-        return result.text
+        try:
+            with open(tmp_path, "rb") as audio_file:
+                result = self.client.audio.transcriptions.create(
+                    model="openai/whisper-large-v3",
+                    file=audio_file,
+                )
+            return result.text
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
     async def synthesize_to_file(self, text: str) -> str:
         """Generate TTS audio with edge-tts, return path to mp3 file."""
@@ -76,6 +80,3 @@ class NIMServices:
         )
         await communicate.save(tmp.name)
         return tmp.name
-
-    def synthesize_sync(self, text: str) -> str:
-        return asyncio.run(self.synthesize_to_file(text))

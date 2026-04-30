@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -74,7 +75,8 @@ async def stats(ctx: commands.Context):
     """Show NIM token usage."""
     if not guild_allowed(ctx):
         return
-    rows = get_usage_summary()
+    loop = asyncio.get_running_loop()
+    rows = await loop.run_in_executor(None, get_usage_summary)
     if not rows:
         await ctx.send("zero token-uri folosite.")
         return
