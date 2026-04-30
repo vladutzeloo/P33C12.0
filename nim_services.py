@@ -85,7 +85,7 @@ class NIMServices:
                     file=audio_file,
                     language=ASR_LANGUAGE,
                 )
-            return result.text
+            return result.text or ""
         finally:
             try:
                 os.remove(tmp_path)

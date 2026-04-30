@@ -120,7 +120,7 @@ class AudioHandler:
                     )
                     print(f"[ASR] {user_id}: {transcript}")
 
-                    if not transcript.strip():
+                    if not transcript or not transcript.strip():
                         continue
 
                     user_history = list(self.history[user_id])
