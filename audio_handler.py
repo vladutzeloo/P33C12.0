@@ -26,6 +26,9 @@ class AudioSink(voice_recv.AudioSink):
             self.buffer[uid] = []
         self.buffer[uid].append(data.pcm)
 
+    def wants_opus(self) -> bool:
+        return False
+
     def cleanup(self):
         self.buffer.clear()
 
