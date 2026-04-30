@@ -1,20 +1,24 @@
 import asyncio
 import io
+import os
 import wave
+from collections import deque, defaultdict
 import discord
 from discord.ext import voice_recv
 from nim_services import NIMServices
+from schemas import ChatMessage
 
 
 SILENCE_THRESHOLD = 500   # ms of silence before processing
 MIN_AUDIO_LEN = 1.0       # seconds minimum for valid audio
+HISTORY_TURNS = 6         # rolling per-user message buffer (user+assistant pairs)
 
 
 class AudioSink(voice_recv.AudioSink):
     """Custom sink to capture raw PCM audio from Discord voice."""
 
     def __init__(self):
-        self.buffer: dict[int, list[bytes]] = {}  # user_id -> chunks
+        self.buffer: dict[int, list[bytes]] = {}
 
     def write(self, user: discord.User, data: voice_recv.VoiceData):
         uid = user.id if user else 0
@@ -27,32 +31,48 @@ class AudioSink(voice_recv.AudioSink):
 
 
 class AudioHandler:
+    def __init__(self):
+        self.history: dict[int, deque[ChatMessage]] = defaultdict(
+            lambda: deque(maxlen=HISTORY_TURNS * 2)
+        )
+
     def pcm_to_wav(self, pcm_data: bytes, channels: int = 2, rate: int = 48000) -> bytes:
-        """Convert raw PCM to WAV bytes for NIM ASR."""
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(channels)
-            wf.setsampwidth(2)  # 16-bit
+            wf.setsampwidth(2)
             wf.setframerate(rate)
             wf.writeframes(pcm_data)
         return buf.getvalue()
 
+    async def speak(self, vc: discord.VoiceClient, nim: NIMServices, text: str):
+        """Synthesize text and play it through the voice client."""
+        path = await nim.synthesize_to_file(text)
+        if vc.is_playing():
+            vc.stop()
+        source = discord.FFmpegPCMAudio(path)
+        done = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def after(err):
+            loop.call_soon_threadsafe(done.set)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+        vc.play(source, after=after)
+        await done.wait()
+
     async def listen_and_respond(self, vc: discord.VoiceClient, nim: NIMServices):
-        """
-        Main voice loop:
-        1. Capture audio via AudioSink
-        2. Transcribe with NIM ASR
-        3. Generate response with NIM LLM (rat personality)
-        4. Synthesize and play back via TTS
-        """
         sink = AudioSink()
-        vc.listen(sink)  # requires discord-ext-voice-recv
+        vc.listen(sink)
 
         print("[AudioHandler] Listening...")
         await asyncio.sleep(SILENCE_THRESHOLD / 1000)
 
         while vc.is_connected():
-            await asyncio.sleep(2)  # poll interval
+            await asyncio.sleep(2)
 
             for user_id, chunks in list(sink.buffer.items()):
                 if not chunks:
@@ -61,8 +81,7 @@ class AudioHandler:
                 pcm = b"".join(chunks)
                 sink.buffer[user_id] = []
 
-                # Skip if too short
-                duration = len(pcm) / (48000 * 2 * 2)  # bytes / (rate * channels * width)
+                duration = len(pcm) / (48000 * 2 * 2)
                 if duration < MIN_AUDIO_LEN:
                     continue
 
@@ -75,15 +94,18 @@ class AudioHandler:
                     if not transcript.strip():
                         continue
 
-                    response_text = nim.chat(transcript)
-                    print(f"[LLM] RatBot: {response_text}")
+                    user_history = list(self.history[user_id])
+                    response_text = nim.chat(transcript, history=user_history)
+                    print(f"[LLM] {response_text}")
 
-                    # TODO: Replace with NIM TTS when available
-                    # tts_audio = nim.synthesize(response_text)
-                    # vc.play(discord.FFmpegPCMAudio(io.BytesIO(tts_audio), pipe=True))
+                    self.history[user_id].append(
+                        ChatMessage(role="user", content=transcript)
+                    )
+                    self.history[user_id].append(
+                        ChatMessage(role="assistant", content=response_text)
+                    )
 
-                    # Fallback: print to console (enable TTS when microservice ready)
-                    print(f"[TTS PENDING] Would say: {response_text}")
+                    await self.speak(vc, nim, response_text)
 
                 except Exception as e:
                     print(f"[AudioHandler] Error: {e}")
