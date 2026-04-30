@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import time
 import wave
 from collections import deque, defaultdict
 import discord
@@ -29,6 +30,7 @@ discord.opus.Decoder.decode = _safe_opus_decode
 SILENCE_THRESHOLD = 500   # ms of silence before processing
 MIN_AUDIO_LEN = 0.6       # seconds minimum for valid audio
 HISTORY_TURNS = 6         # rolling per-user message buffer (user+assistant pairs)
+IDLE_INTERVAL_SEC = 45    # seconds of silence before bot blurts something
 
 
 class AudioSink(voice_recv.AudioSink):
@@ -91,8 +93,12 @@ class AudioHandler:
         print("[AudioHandler] Listening...")
         await asyncio.sleep(SILENCE_THRESHOLD / 1000)
 
+        last_activity = time.time()
+
         while vc.is_connected():
             await asyncio.sleep(2)
+            loop = asyncio.get_running_loop()
+            spoke_this_round = False
 
             for user_id, chunks in list(sink.buffer.items()):
                 if not chunks:
@@ -109,7 +115,6 @@ class AudioHandler:
                 wav_bytes = self.pcm_to_wav(pcm)
 
                 try:
-                    loop = asyncio.get_running_loop()
                     transcript = await loop.run_in_executor(
                         None, nim.transcribe, wav_bytes
                     )
@@ -132,6 +137,21 @@ class AudioHandler:
                     )
 
                     await self.speak(vc, nim, response_text)
+                    spoke_this_round = True
 
                 except Exception as e:
                     print(f"[AudioHandler] Error: {e}")
+
+            if spoke_this_round:
+                last_activity = time.time()
+            elif (
+                time.time() - last_activity > IDLE_INTERVAL_SEC
+                and not vc.is_playing()
+            ):
+                try:
+                    remark = await loop.run_in_executor(None, nim.idle_remark)
+                    print(f"[Idle] {remark}")
+                    await self.speak(vc, nim, remark)
+                except Exception as e:
+                    print(f"[AudioHandler] Idle error: {e}")
+                last_activity = time.time()

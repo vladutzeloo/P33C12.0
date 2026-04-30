@@ -59,6 +59,15 @@ class NIMServices:
 
         return response.choices[0].message.content
 
+    def idle_remark(self) -> str:
+        """Generate a short in-character filler remark for silent moments."""
+        prompt = (
+            "E linişte de ceva timp. Aruncă o replică scurtă în caracter — "
+            "o glumă neagră, un fapt random absurd, sau o observaţie "
+            "sarcastică. Maxim 1-2 propoziţii. Direct, fără introducere."
+        )
+        return self.chat(prompt)
+
     def transcribe(self, audio_bytes: bytes, filename: str = "audio.wav") -> str:
         if not self.asr_client:
             raise RuntimeError(
