@@ -14,6 +14,16 @@ NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NIM_API_KEY = os.getenv("NVIDIA_API_KEY")
 DEFAULT_MODEL = os.getenv("NIM_LLM_MODEL", "meta/llama-3.1-70b-instruct")
 
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_ASR_MODEL = os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
+ASR_LANGUAGE = os.getenv("ASR_LANGUAGE", "ro")
+ASR_PROMPT = os.getenv(
+    "ASR_PROMPT",
+    "Conversaţie casuală în română între prieteni. Vorbire naturală, "
+    "argou, înjurături uşoare, propoziţii scurte.",
+)
+
 TTS_VOICE = os.getenv("TTS_VOICE", "ro-RO-EmilNeural")
 TTS_RATE = os.getenv("TTS_RATE", "+40%")
 TTS_PITCH = os.getenv("TTS_PITCH", "-5Hz")
@@ -22,6 +32,10 @@ TTS_PITCH = os.getenv("TTS_PITCH", "-5Hz")
 class NIMServices:
     def __init__(self):
         self.client = OpenAI(base_url=NIM_BASE_URL, api_key=NIM_API_KEY)
+        self.asr_client = (
+            OpenAI(base_url=GROQ_BASE_URL, api_key=GROQ_API_KEY)
+            if GROQ_API_KEY else None
+        )
         self.system_prompt = build_system_prompt()
 
     def chat(self, user_message: str, history: list[ChatMessage] | None = None) -> str:
@@ -51,17 +65,34 @@ class NIMServices:
 
         return response.choices[0].message.content
 
+    def idle_remark(self) -> str:
+        """Generate a short in-character filler remark for silent moments."""
+        prompt = (
+            "E linişte de ceva timp. Aruncă o replică scurtă în caracter — "
+            "o glumă neagră, un fapt random absurd, sau o observaţie "
+            "sarcastică. Maxim 1-2 propoziţii. Direct, fără introducere."
+        )
+        return self.chat(prompt)
+
     def transcribe(self, audio_bytes: bytes, filename: str = "audio.wav") -> str:
+        if not self.asr_client:
+            raise RuntimeError(
+                "GROQ_API_KEY not set — needed for ASR. "
+                "Get one free at https://console.groq.com"
+            )
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(audio_bytes)
             tmp_path = f.name
         try:
             with open(tmp_path, "rb") as audio_file:
-                result = self.client.audio.transcriptions.create(
-                    model="openai/whisper-large-v3",
+                result = self.asr_client.audio.transcriptions.create(
+                    model=GROQ_ASR_MODEL,
                     file=audio_file,
+                    language=ASR_LANGUAGE,
+                    prompt=ASR_PROMPT,
+                    temperature=0.0,
                 )
-            return result.text
+            return result.text or ""
         finally:
             try:
                 os.remove(tmp_path)

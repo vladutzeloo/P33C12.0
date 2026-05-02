@@ -1,5 +1,5 @@
 discord.py[voice]>=2.3.2
-discord-ext-voice-recv>=0.7.0
+discord-ext-voice-recv==0.5.2a179
 openai>=1.30.0
 python-dotenv>=1.0.0
 pydantic>=2.5.0

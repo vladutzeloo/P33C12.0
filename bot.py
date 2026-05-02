@@ -1,8 +1,11 @@
 import os
 import asyncio
+import logging
 import discord
-from discord.ext import commands
+from discord.ext import commands, voice_recv
 from dotenv import load_dotenv
+
+logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
 from nim_services import NIMServices
 from audio_handler import AudioHandler
 from db import init_db, get_usage_summary
@@ -48,8 +51,12 @@ async def join_voice(ctx: commands.Context):
         await ctx.send("bagă-te într-un voice mai întâi.")
         return
 
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect(force=True)
+        await asyncio.sleep(1)
+
     channel = ctx.author.voice.channel
-    vc = await channel.connect()
+    vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
     await ctx.send(f"intru în {channel.name}.")
 
     try:

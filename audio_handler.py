@@ -1,17 +1,38 @@
 import asyncio
+import audioop
 import io
 import os
+import time
 import wave
 from collections import deque, defaultdict
 import discord
+import discord.opus
 from discord.ext import voice_recv
 from nim_services import NIMServices
 from schemas import ChatMessage
 
 
+# Patch discord.opus.Decoder.decode so a corrupted packet doesn't kill
+# the voice_recv router thread — known instability in the alpha lib.
+_SILENCE_FRAME = b"\x00" * 3840  # 20ms @ 48kHz stereo 16-bit
+_orig_opus_decode = discord.opus.Decoder.decode
+
+
+def _safe_opus_decode(self, data, fec=False):
+    try:
+        return _orig_opus_decode(self, data, fec=fec)
+    except discord.opus.OpusError:
+        return _SILENCE_FRAME
+
+
+discord.opus.Decoder.decode = _safe_opus_decode
+
+
 SILENCE_THRESHOLD = 500   # ms of silence before processing
-MIN_AUDIO_LEN = 1.0       # seconds minimum for valid audio
+MIN_AUDIO_LEN = 0.6       # seconds minimum for valid audio
+MIN_RMS = 350             # min audio loudness; below this, skip (Whisper hallucinates on quiet audio)
 HISTORY_TURNS = 6         # rolling per-user message buffer (user+assistant pairs)
+IDLE_INTERVAL_SEC = 45    # seconds of silence before bot blurts something
 
 
 class AudioSink(voice_recv.AudioSink):
@@ -25,6 +46,9 @@ class AudioSink(voice_recv.AudioSink):
         if uid not in self.buffer:
             self.buffer[uid] = []
         self.buffer[uid].append(data.pcm)
+
+    def wants_opus(self) -> bool:
+        return False
 
     def cleanup(self):
         self.buffer.clear()
@@ -71,8 +95,12 @@ class AudioHandler:
         print("[AudioHandler] Listening...")
         await asyncio.sleep(SILENCE_THRESHOLD / 1000)
 
+        last_activity = time.time()
+
         while vc.is_connected():
             await asyncio.sleep(2)
+            loop = asyncio.get_running_loop()
+            spoke_this_round = False
 
             for user_id, chunks in list(sink.buffer.items()):
                 if not chunks:
@@ -82,19 +110,23 @@ class AudioHandler:
                 sink.buffer[user_id] = []
 
                 duration = len(pcm) / (48000 * 2 * 2)
+                rms = audioop.rms(pcm, 2)
+                print(f"[AudioHandler] buffered {duration:.2f}s rms={rms} from {user_id}")
                 if duration < MIN_AUDIO_LEN:
+                    continue
+                if rms < MIN_RMS:
+                    print(f"[AudioHandler] too quiet (rms={rms} < {MIN_RMS}), skipping")
                     continue
 
                 wav_bytes = self.pcm_to_wav(pcm)
 
                 try:
-                    loop = asyncio.get_running_loop()
                     transcript = await loop.run_in_executor(
                         None, nim.transcribe, wav_bytes
                     )
                     print(f"[ASR] {user_id}: {transcript}")
 
-                    if not transcript.strip():
+                    if not transcript or not transcript.strip():
                         continue
 
                     user_history = list(self.history[user_id])
@@ -111,6 +143,21 @@ class AudioHandler:
                     )
 
                     await self.speak(vc, nim, response_text)
+                    spoke_this_round = True
 
                 except Exception as e:
                     print(f"[AudioHandler] Error: {e}")
+
+            if spoke_this_round:
+                last_activity = time.time()
+            elif (
+                time.time() - last_activity > IDLE_INTERVAL_SEC
+                and not vc.is_playing()
+            ):
+                try:
+                    remark = await loop.run_in_executor(None, nim.idle_remark)
+                    print(f"[Idle] {remark}")
+                    await self.speak(vc, nim, remark)
+                except Exception as e:
+                    print(f"[AudioHandler] Idle error: {e}")
+                last_activity = time.time()
